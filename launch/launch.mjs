@@ -106,9 +106,11 @@ async function githubRawMetadataUri() {
   writeFileSync(join(REPO_ROOT, 'metadata.json'), `${JSON.stringify(metadataJson, null, 2)}\n`);
   const git = (args) => execFileSync('git', ['-C', REPO_ROOT, ...args], { encoding: 'utf8' });
   git(['add', 'logo.png', 'metadata.json']);
-  const status = git(['status', '--porcelain']);
+  // Only commit when these two files themselves changed (other dirty files in the
+  // repo must not trigger — or be swept into — this commit).
+  const status = git(['status', '--porcelain', '--', 'logo.png', 'metadata.json']);
   if (status.trim()) {
-    git(['-c', 'user.name=RenzzHGE', '-c', 'user.email=RenzzHGE@users.noreply.github.com', 'commit', '-m', 'metadata: logo + metadata.json for the 8BALL coin']);
+    git(['-c', 'user.name=RenzzHGE', '-c', 'user.email=RenzzHGE@users.noreply.github.com', 'commit', '-m', 'metadata: logo + metadata.json for the 8BALL coin', '--', 'logo.png', 'metadata.json']);
     git(['push', 'origin', GITHUB_BRANCH]);
   }
   const uri = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/metadata.json`;
@@ -153,8 +155,12 @@ if (DRY_RUN) {
   console.log(JSON.stringify({ step: 'simulate', err: sim.value.err ?? null, logs: (sim.value.logs ?? []).slice(-3) }));
   if (sim.value.err) {
     const s = JSON.stringify(sim.value.err);
-    if (s.includes('InsufficientFunds') || s.includes('insufficient')) {
-      console.log('DRY-RUN OK: simulation fails only on insufficient funds — the expected blocker (wallet holds 0 SOL). The transaction itself is well-formed.');
+    // An unfunded wallet's account does not exist on-chain at all until it first
+    // receives SOL, so simulation reports AccountNotFound for the fee payer —
+    // verified by a control: a trivial self-transfer from the same wallet fails
+    // with the identical error. Both mean the same blocker: 0 SOL.
+    if (s.includes('InsufficientFunds') || s.includes('insufficient') || s.includes('AccountNotFound')) {
+      console.log('DRY-RUN OK: simulation fails only because the fee-payer account is unfunded (0 SOL, never funded) — the expected blocker. The transaction itself is well-formed.');
     } else {
       console.error('DRY-RUN PROBLEM: simulation failed for a reason other than funds — inspect before launching.');
       process.exit(4);
